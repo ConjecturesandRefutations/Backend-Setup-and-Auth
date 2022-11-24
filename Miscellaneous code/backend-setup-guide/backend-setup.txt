@@ -1,0 +1,197 @@
+# Back-end app setup
+
+⚠️ **If using a generator, like Ironlauncher, skip to step 4, because generators will do all configs for you. Additionally, the generator will add two more folders: a config folder, that will hold the configs previously handled in app.js; an error-handling folder.**
+
+---
+
+## 1. Project initialization and structure
+
+- [ ]  Create a folder for your project (ex.: “my-app”)
+- [ ]  On your terminal, go to “my-app” directory and run the command `npm init -y` in order to create you `package.json` file
+- [ ]  Create the following folders (according to your needs):
+    - data - will hold any data you need for seeding (if wanted to)
+    - db - will hold the required database configurations
+    - models - will hold any models you may need
+    - public - will hold all static files, like images and styles
+    - routes - will hold your route files
+    - seeds - will hold your seeding (info that you want to push to your database at the start)
+    - views - will hold all of your views, which will display information
+- [ ]  Also on your root (your “my-app” folder, not inside any other folder), create the following files:
+    - .env - will hold your secret variables
+    - .gitignore - will mark all files that should not be included on your GitHub commits, for example `.env` and `node_modules/`
+    - app.js - will be the main handler of your project
+- [ ]  By now, your app’s structure should be as following:
+
+![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/b9b1a3c9-7d84-4b74-924f-4c254e6692c4/Untitled.png)
+
+- [ ]  Run the command `npm i express dotenv mongoose nodemon handlebars` to install the following dependencies:
+    - Express - the framework we’re using for node
+    - Dotenv - extracts environment variables from a .env file into process.env
+    - Mongoose - tool designed to work with MongoDB in an asynchronous environment
+    - Nodemon - automatically restarts the node application on file changes
+    - Handlebars - the templating language we’re using to generate our HTML
+- [ ]  Update the scripts on your package.json file for the following:
+
+```jsx
+"scripts": {
+	"dev": "nodemon -e hbs,js app.js"
+},
+```
+
+From this point on, you can run your project by running the command `npm run dev` and it will automatically update whenever changes occur.
+
+## 2. Database configuration
+
+- [ ]  Open your `index.js` file inside the db folder
+- [ ]  Require mongoose
+- [ ]  Setting the MongoDB URI for our app to have access to it. If no `.env` has been set, we dynamically set it to whatever the folder name was upon the creation of the app
+- [ ]  Create the connection to the database
+
+At this point, your `db > index.js` should look like the following:
+
+```jsx
+const mongoose = require("mongoose");
+
+const MONGO_URI = process.env.MONGODB_URI || "mongodb://localhost/lab-express-drones";
+
+mongoose
+.connect(MONGO_URI)
+.then((x) => {
+console.log(Connected to Mongo! Database name: "${x.connections[0].name}");
+})
+.catch((err) => {
+console.error("Error connecting to mongo: ", err);
+});
+```
+
+## 3. App configuration
+
+- [ ]  Open your `app.js` file
+- [ ]  Require express and hbs
+- [ ]  Create a new instance of app, using `express()`
+- [ ]  Require the database
+- [ ]  Inform your app that all static files are located in the public folder
+- [ ]  Set hbs as your view engine
+- [ ]  Allow your app to use the public folder
+- [ ]  Set partials’ location, by registering them
+- [ ]  Retrieve the payload of a POST request
+- [ ]  Require your `routes > index.js` file, to use it
+- [ ]  Configure where your app will be running with app.listen
+
+At this point, your `app.js` should look like the following:
+
+```jsx
+const express = require("express");
+const hbs = require("hbs");
+
+const app = express();
+
+require('../db');
+
+app.set("views", __dirname + "/views");
+app.set("view engine", "hbs");
+
+app.use(express.static("public"));
+
+hbs.registerPartials(__dirname + "/views/partials");
+
+app.use(express.urlencoded({ extended: true }));
+
+const index = require('./routes/index.routes');
+app.use('/', index);
+
+app.listen(process.env.PORT, () =>
+	console.log(`Server 🏃 on http://localhost:${process.env.PORT}`)
+);
+```
+
+## 4. Creating a model and seeding information
+
+- [ ]  On your model folder, create a file that will hold your model. Naming convention says we should call it the type of product it stores, in the singular and with capital letter, followed by model (ex.: `Book.model.js`)
+- [ ]  Require Schema and model from mongoose
+- [ ]  Create the schema
+- [ ]  Export your model, defining its name and assigning the schema
+
+At this point, your `models > Book.model.js` should look like the following:
+
+```jsx
+const { Schema, model } = require("mongoose");
+
+const bookSchema = new Schema(
+  {
+    name: {
+			type: String,
+			required: true,
+		},
+    author: String,
+  }
+);
+
+module.exports = model("Book", bookSchema);
+```
+
+- [ ]  On your seeds folder, create a file that will seed your Book model data (previously stored in the data folder), in this case `books.seed.js`
+- [ ]  Require the database
+- [ ]  Require mongoose
+- [ ]  Require the model in which we’re seeding data. In this case, the Book model
+- [ ]  Require the data
+- [ ]  Seed the database, using mongoose’s `create()` method
+- [ ]  Don’t forget to close the connection to the database after the seeding
+- [ ]  Run the command `node seed/books.seed.js` to seed the database
+
+At this point, your `seeds > books.seed.js` should look like the following:
+
+```jsx
+require('../db');
+
+const mongoose = require("mongoose");
+const Book = require("../models/Book.model");
+
+const books = [
+  { name: "My first book", author: "Me" },
+  { name: "My other book" },
+  { name: "Harry Potter", author: "J.K.Rolling" },
+];
+
+Book.create(books)
+  .then((seededBooks) => {
+    console.log(`You've just created ${seededBooks.length} books`);
+    mongoose.connection.close();
+  })
+  .catch((err) => {
+    console.log("You ran into an error while creating the documents", err);
+  });
+```
+
+## Configuring the routes
+
+- [ ]  On your routes folder, create an `index.routes.js` file, that will handle all other routes’ files (we will have as many routes’ files as the type of routes created, for example, one for users, one for books, etc)
+- [ ]  Require express
+- [ ]  Create a new instance of router, with express.Router()
+- [ ]  Create our home route (“/”), that will render index
+- [ ]  Define the prefixes for your routes’ files. By defining prefixes, we don’t have to repeat it every time we create a route. For example, on a `routes > books.routes.js` routing file, in which all routes will start with “/books”, we won’t need to use this prefix because we defined it on `routes > index.routes.js`
+- [ ]  Export the router
+
+At this point, your `router > index.routes.js` should look like the following:
+
+```jsx
+const express = require("express");
+const router = express.Router();
+
+/* GET home page */
+router.get("/", (req, res, next) => res.render("index"));
+
+const bookRoutes = require('./routes/books.js');
+router.use('/books', bookRoutes)
+
+module.exports = router;
+```
+
+- [ ]  Create another file on router folder that will hold your routes, in this case, regarding books `routes > books.routes.js` (if we extended my-app to have users, we would then have a routing file for users’ related routes as well
+- [ ]  Require express
+- [ ]  Create a new instance of router, with express.Router()
+- [ ]  Require the model which information we want to manipulate, in this case, Book model
+- [ ]  Write your routes
+- [ ]  Export the router
+
+At this point, your `router > books.routes.js` should look like the following:

@@ -1,0 +1,548 @@
+# Authentication and Authorization
+
+**In order to access a protected application, a user must insert its access credentials (ex.: username and password). After the application validates the credentials, we'll create an active session and store it in our DB. The session has an expiration date, so the user won’t be able to access forever by inserting credentials once.**
+
+**This active session will send cookies to the user and that pair (session and cookies), will keep matching credentials, to ensure the user is authorized.**
+
+**While using the app (tab open) the session is active. Once closed and reopen, the browser sends a request with the cookie, which will be looked for in the stored session for a match. If the match is found, then the user is still authorized.**
+
+---
+
+## 1. Authentication
+
+1. Create a `auth.routes.js` file that will gather all routes necessary to authentication
+2. Create a GET route that leads to a sign up page
+
+```jsx
+router.get("/signup", (req, res, next) => {
+  res.render("auth/signup");
+});
+```
+
+1. Create a view that will hold the sign up form
+2. While creating the sign up form, we can apply some front-end validations. Most of them are not so useful, since front-end validations are not secure and we'll be applying more on top of them. One to use is the `type="password”`of input, since it hides the letters
+
+```jsx
+<label for="password">Password:</label>
+  <input type="password" name="password" />
+```
+
+1. Create a POST route for the sign up
+    - Destruct the `req.body`, to get the inputs from the form
+    - Apply some backend validators:
+        - With an if statement, check if all the required info was passed. If not, render the form again with an error message
+        
+        ```jsx
+        if (!username || !email || !password) {
+            res.render("auth/signup", { err: "please fill out all information" });
+            return;
+          }
+        ```
+        
+        - Check email format, with a regex
+            - Create a variable that holds the regex
+            - `test()` if the input value complies with the regex, with an if statement
+        
+        ```jsx
+        const emailRegex =
+            /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+          
+        if (!emailRegex.test(email)) {
+            res.render("auth/signup", { signUpErr: "Please present a valid email" });
+            return;
+          }
+        ```
+        
+        - Check password strength
+            - Create a variable that holds the regex
+            - `test()` if the input value complies with the regex, with an if statement
+        
+        ```jsx
+        const passwordRegex =
+                  /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[a-zA-Z]).{8,}$/;
+        
+                if (!passwordRegex.test(password)) {
+                  res.render("auth/signup", {
+                    err: "the password must contain at least 1 uppercase letter, 1 lower case letter, 1 number and 8 digits",
+                  });
+                  return;
+                }const emailRegex =
+            /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+          if (!emailRegex.test(email)) {
+            res.render("auth/signup", { signUpErr: "Please present a valid email" });
+            return;
+          }
+        ```
+        
+        - Check if the fields that are required to be unique (like email) are indeed
+            - Call the model method `findOne()` - findOne because if its suppose to be unique, if there is some there's only one for sure. ⚠️ NOTE: when using Ironlauncher, inside the catch of every promise, we should use next(err), since the generator has already created routes that handle errors and next will point towards them
+            - With an if statement, check if the user exists
+                - If it does, render the form again with an error message
+                - If not, inside the else, continue with the validations
+            
+            ```jsx
+            User.findOne({ username })
+                .then((user) => {
+                  if (user) {
+                    res.render("auth/signup", { err: "that user is already registered" });
+                  } else {
+            
+                    //continue with validations
+                    
+                })
+                .catch((err) => {
+                  next(err);
+                });
+            ```
+            
+        - Encrypt the password
+            - Install the `bcrypt` package
+            - Require it on the `auth.routes.js` file
+            - Create a variable that holds the "salt", using bcrypt's method `genSaltSync()` - pass as argument the # of salts wanted
+            - Create a variable that holds the hashed password, using bcrypt's method `hashSync()` - pass as arguments the password you want to encryt and the salt variable
+            
+            ```jsx
+            const salt = bcrypt.genSaltSync(12);
+            const hash = bcrypt.hashSync(password, salt);
+            ```
+            
+    - Create the user in the DB
+        - Call the model method `create()`, passing on it all the fields required in the model's Schema. ⚠️ ATTENTION: need to pass password with the name defined on the Schema, but **storing the information inside the variable with the hashed password**
+        - If all goes well (`then()`) we should redirect the user to the login page
+    
+    ```jsx
+            User.create({ username, password: hash })
+              .then((user) => {
+                res.redirect("/auth/login");
+              })
+              .catch((err) => {
+                next(err);
+              });
+    ```
+    
+2. Create a GET route that leads to a login page
+
+```jsx
+router.get("/login", (req, res, next) => {
+  res.render("auth/login");
+});
+```
+
+1. Create a view that will hold the login form
+2. Recommend to apply `type="password”` to the login form as well
+3. Install the `express-session` and the `connect-mongo` packages
+4. On `config > index.js`, after requiring "path", require both packages, so that they are available everywhere on the project
+
+```jsx
+// ℹ️ global package used to `normalize` paths amongst different operating systems
+// https://www.npmjs.com/package/path
+const path = require("path");
+
+// require express-session and connect-mongo
+const session = require("express-session");
+const MongoStore = require("connect-mongo");
+```
+
+1. Also on the same file, at the end, connect to the session, with an `app.use(session)`
+    - Inside the session, as an object, write down the typifications we need, such as:
+        - Secret - linked to the .env file, with the method `process.env.NAME_OF_VARIABLE`
+        - SaveUnitialized - false if we don't want to register unitialized (not logged in) sessions on our DB
+        - Cookie - inside cookie we can also define some typifications, like maxAge (takes seconds, so we need to multiply by minutes, hours and days, if needed)
+        - Store - call the MongoStore method `create()` - pass as argument an object that holds typifications for the storage of the session
+            - mongoUrl - copy the location of the DB from the `db > index.js` file (copy both the url and the .env extension)
+            - ttl (time to leave) - works the same way as the maxAge of cookies
+    
+    ```jsx
+    app.use(
+        session({
+          secret: process.env.SESSION_SECRET,
+          saveUninitialized: false,
+          cookie: {
+            maxAge: 60 * 60 * 24 * 7,
+          },
+          store: MongoStore.create({
+            mongoUrl:
+              process.env.MONGODB_URI ||
+              "mongodb://localhost/lab-express-basic-auth",
+            ttl: 60 * 60 * 24 * 7,
+          }),
+        })
+      );
+    ```
+    
+2. Create a POST route for the login
+    - Destruct the `req.body`
+    - Apply some backend validations (if needed/wanted)
+        - With an if statement, check if the info was passed. If not, render the form again with an error message
+        
+        ```jsx
+        if (!username || !email || !password) {
+            res.render("auth/login", { err: "please fill out all information" });
+            return;
+          }
+        ```
+        
+        - Check if user exists in the DB
+            - Call the model method `findOne()`
+            - With an if statement, check if the user exists
+                - If it does, inside the else, continue with the validations
+                - If not, render the form again with an error message
+            
+            ```jsx
+            UserModel.findOne({ username })
+                .then((user) => {
+                  if (!user) {
+                    res.render("auth/login", { err: "that user is not registered" });
+                    return;
+                  } else {
+                    
+                    //continue with validations
+                    
+                  }
+                })
+                .catch((err) => {
+                  next(err);
+                });
+            ```
+            
+        - Check if the password matches
+            - Create a variable that holds a boolean as response to a comparisson between the given password and the one already stored in the DB, using bcrypt's method `compareSync()` - pass as arguments the given password and the user's password stored in the DB
+            - With an if statement, check if the user exists
+                - If it does, inside the else, continue with the authentication
+                - If not, render the form again with an error message
+        
+        ```jsx
+        const passwordCheck = bcrypt.compareSync(password, user.password);
+        
+                if (passwordCheck) {
+                  
+        				// continue with authentication
+        
+                } else {
+                  res.render("auth/login", { err: "wrong password" });
+                  return;
+                }
+        ```
+        
+    - Authenticate the user, aka create an active session
+        - Define `req.session.loggedInUser` as our user (don't forget we're still inside the user model `findOne()` method, where we got as output 1 user) - this variable will hold the credentials of the user
+        - Create a global variable on HBS to help with authentication, by defining `req.app.locals.isLoggedIn` as `true` - don't forget that `app.locals` stores HBS global variables
+    - Redirect the user to a private route
+    
+    ```jsx
+    if (passwordCheck) {
+              //authenticate user and active session
+              req.session.loggedInUser = user;
+              req.app.locals.isLoggedIn = true;
+    
+              //redirect user to a private route
+              res.redirect("/main");
+            } else {
+              res.render("auth/login", { err: "wrong password" });
+              return;
+            }
+    ```
+    
+3. Create a GET route for the log out process
+    - Create a log out button
+    - Use `req.session.destroy()`, to kill the session
+    - Then, redirect to the login page
+    
+    ```jsx
+    router.get("/logout", (req, res, next) => {
+      req.session.destroy((err) => {
+            if (err) {
+                console.log(err)
+                return next(err)
+            }
+    
+            return res.redirect("/auth/login")
+        })
+    });
+    ```
+    
+
+⚠️ **Bonus**: Additionally, we can add some of the validations we did to the User model, as extra precaution. For example, adding `lowercase` and `trim` properties to email and `match` property to email and password.
+
+```jsx
+email:{
+    type: String,
+    unique: true, 
+    lowercase: true,
+    trim: true,
+    required: true,
+    match: [/^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/, 'Please fill a valid email']
+}
+```
+
+## 2. Authorization
+
+1. Create a folder on the project named middlewares
+2. Inside, create a file named `auth.middlewares.js`. This file will be used to check all routes for an active session, on a given route file that require this middleware file
+    - Export an object that contains a function which checks if the user is logged in
+        - `isLoggedIn` should have a `(req, res, next)` arguments and and if statement to check if the `req.session.loggedInUser` exists
+        - If it does, should pass `next()`, so that the server continues reading through our route file code
+        - If not, should redirect to the log in page
+    
+    ```jsx
+    module.exports = {
+      isLoggedIn: (req, res, next) => {
+        if (req.session.loggedInUser) {
+          next();
+        } else {
+          res.redirect("/auth/login");
+        }
+      },
+    };
+    ```
+    
+3. ⚠️In every file of routes that require authorization, we need to require the object key `{ isLoggedIn }` (which contains the is logged in function), from the middleware file
+4. ⚠️ For all the routes that require authorization, in the `router.get()`, after the path and before the `(req, res, next)`, we should add another argument, which is the key we imported - `isLoggedIn`
+5. This way, if the user has logged in and has an active session, he will be able to access those routes and all information they pass. If not, he will need to log in first
+
+```jsx
+const router = require("express").Router();
+const { isLoggedIn } = require("../middlewares/auth-middleware.js");
+
+// our routes
+router.get("/private", isLoggedIn, (req, res, next) => {
+  res.render("private/private");
+});
+
+module.exports = router;
+```
+
+## How your files should look like, at this point
+
+### 1. config > index.js
+
+```jsx
+// We reuse this import in order to have access to the `body` property in requests
+const express = require("express");
+
+// ℹ️ Responsible for the messages you see in the terminal as requests are coming in
+// https://www.npmjs.com/package/morgan
+const logger = require("morgan");
+
+// ℹ️ Needed when we deal with cookies (we will when dealing with authentication)
+// https://www.npmjs.com/package/cookie-parser
+const cookieParser = require("cookie-parser");
+
+// ℹ️ Serves a custom favicon on each request
+// https://www.npmjs.com/package/serve-favicon
+const favicon = require("serve-favicon");
+
+// ℹ️ global package used to `normalize` paths amongst different operating systems
+// https://www.npmjs.com/package/path
+const path = require("path");
+
+// require express-session and connect-mongo
+const session = require("express-session");
+const MongoStore = require("connect-mongo");
+
+// Middleware configuration
+module.exports = (app) => {
+  // In development environment the app logs
+  app.use(logger("dev"));
+
+  // To have access to `body` property in the request
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
+  app.use(cookieParser());
+
+  // Normalizes the path to the views folder
+  app.set("views", path.join(__dirname, "..", "views"));
+  // Sets the view engine to handlebars
+  app.set("view engine", "hbs");
+  // Handles access to the public folder
+  app.use(express.static(path.join(__dirname, "..", "public")));
+
+  // middleware for session usage
+  app.use(
+    session({
+      secret: process.env.SESSION_SECRET,
+      saveUninitialized: false,
+      cookie: {
+        maxAge: 60 * 60 * 24 * 7,
+      },
+      store: MongoStore.create({
+        mongoUrl:
+          process.env.MONGODB_URI ||
+          "mongodb://localhost/lab-express-basic-auth",
+        ttl: 60 * 60 * 24 * 7,
+      }),
+    })
+  );
+
+  // Handles access to the favicon
+  app.use(
+    favicon(path.join(__dirname, "..", "public", "images", "favicon.ico"))
+  );
+};
+```
+
+### 2. models > User.model.js
+
+```jsx
+const { Schema, model } = require("mongoose");
+
+// TODO: Please make sure you edit the user model to whatever makes sense in this case
+const userSchema = new Schema({
+  username: {
+    type: String,
+    unique: true,
+		required: true
+  },
+	email: {
+		type: String,
+		unique: true,
+		required: true
+	},
+  password: {
+		type: String,
+		required: true
+	},
+});
+
+const User = model("User", userSchema);
+
+module.exports = User;
+```
+
+### 3. routes > auth.routes.js
+
+```jsx
+const router = require("express").Router();
+const UserModel = require("../models/User.model");
+const bcrypt = require("bcrypt");
+
+// our routes
+router.get("/signup", (req, res, next) => {
+  res.render("auth/signup");
+});
+
+router.post("/signup", (req, res, next) => {
+  const { username, email, password } = req.body;
+
+  //check if we have all info
+  if (!username || !email || !password) {
+    res.render("auth/signup", { err: "please fill out all information" });
+    return;
+  }
+
+	const emailRegex =
+    /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+  
+	if (!emailRegex.test(email)) {
+    res.render("auth/signup", { signUpErr: "Please present a valid email" });
+    return;
+  }
+
+	//check password strength
+        const passwordRegex =
+          /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[a-zA-Z]).{8,}$/;
+
+        if (!passwordRegex.test(password)) {
+          res.render("auth/signup", {
+            err: "the password must contain at least 1 uppercase letter, 1 lower case letter, 1 number and 8 digits",
+          });
+          return;
+        }
+
+  //check if username is unique
+  UserModel.findOne({ username })
+    .then((user) => {
+      if (user) {
+        res.render("auth/signup", { err: "that user is already registered" });
+      } else {
+        
+
+        //encrypt password
+        const salt = bcrypt.genSaltSync(12);
+        const hash = bcrypt.hashSync(password, salt);
+
+        //create the user in the DB
+        UserModel.create({ username, password: hash })
+          .then((user) => {
+            res.redirect("/auth/login");
+          })
+          .catch((err) => {
+            next(err);
+          });
+      }
+    })
+    .catch((err) => {
+      next(err);
+    });
+});
+
+router.get("/login", (req, res, next) => {
+  res.render("auth/login");
+});
+
+router.post("/login", (req, res, next) => {
+  const { username, email, password } = req.body;
+
+  //check if we have all info
+  if (!username || !email || !password) {
+    res.render("auth/login", { err: "please fill out all information" });
+    return;
+  }
+
+  //check if user exists
+  UserModel.findOne({ username })
+    .then((user) => {
+      if (!user) {
+        res.render("auth/login", { err: "that user is not registered" });
+        return;
+      } else {
+        //check if password matches
+        const passwordCheck = bcrypt.compareSync(password, user.password);
+
+        if (passwordCheck) {
+          //authenticate user and active session
+          req.session.loggedInUser = user;
+          req.app.locals.isLoggedIn = true;
+
+          //redirect user to a private route
+          res.redirect("/main");
+        } else {
+          res.render("auth/login", { err: "wrong password" });
+          return;
+        }
+      }
+    })
+    .catch((err) => {
+      next(err);
+    });
+});
+
+router.get("/logout", (req, res, next) => {
+  req.session.destroy((err) => {
+        if (err) {
+            console.log(err)
+            return next(err)
+        }
+
+        return res.redirect("/auth/login")
+    });
+});
+
+module.exports = router;
+```
+
+### 4. middlewares > auth.middlewares.js
+
+```jsx
+module.exports = {
+  isLoggedIn: (req, res, next) => {
+    if (req.session.loggedInUser) {
+      next();
+    } else {
+      res.redirect("/auth/login");
+    }
+  },
+};
+```
+
+### 5. Any private routes file you have
